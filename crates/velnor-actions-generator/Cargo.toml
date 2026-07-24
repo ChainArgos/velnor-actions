@@ -14,3 +14,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "velnor-actions-generator"
 path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+toml = { version = "0.9.8", default-features = false, features = ["parse", "serde"] }

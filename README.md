@@ -17,11 +17,31 @@ Canonical source of the Velnor Actions fleet.
 
 ## Layout
 
-- `actions/` — reusable building blocks (real content lands in plans 005/006).
-- `templates/` — one normalized workflow template per repository class (real
-  content lands in plans 005/006).
-- `crates/velnor-actions-generator/` — the Rust generator seam and its skeleton
-  self-check.
+- `fleet/` — declared data: `repositories.toml` (the exhaustive 24-member map to
+  five classes), `classes.toml` (the five class contracts), and `block-sha` (the
+  immutable commit that pins the internal composite-action closure used by the
+  callable workflows — not the consumer release pin).
+- `actions/` — reusable composite building blocks: `run-gate` (runs one named gate
+  command identically on either lane) and `aggregate` (emits the lane contract).
+- `.github/workflows/ci-<class>.yml` — the five owner-local callable (`workflow_call`)
+  workflows, one per class. Generated; each pins its composite closure to `block-sha`.
+- `templates/<class>/ci.yml` — the five normalized consumer templates, one per class,
+  byte-identical within a class. Each has three owner-local reusable-workflow calls
+  (jackin-project / tailrocks / ChainArgos) selected by `github.repository_owner`, a
+  shared `@<sha> # <CalVer>` release pin, and a fail-closed `ci-required` aggregator.
+- `crates/velnor-actions-generator/` — the Rust generator: `model` (data + validation),
+  `render` (deterministic rendering), `audit` (regeneration, byte, closure, and
+  fail-closed aggregation checks), and the CLI.
+
+## Generator CLI
+
+- `generate --root .` — render the five templates (and, once `block-sha` is bound,
+  the five callable workflows).
+- `render-consumer --root . --repository OWNER/REPO --release-sha <40-hex> --calver
+  <CalVer> --output DIR` — materialize one consumer's `DIR/.github/workflows/ci.yml`,
+  replacing `@FLEET_SHA@`/`@CALVER@` atomically.
+- `audit --root .` — the full fleet audit (prints
+  `fleet valid: 24 repositories, 5 classes, 5 templates`).
 
 ## Gates
 
@@ -30,8 +50,9 @@ with:
 
 ```bash
 mise install --locked
+mise run generate       # re-render from data (should be a no-op on a clean tree)
 mise run ci
 ```
 
 `mise run ci` runs `fmt`, `lint` (clippy `-D warnings`), `test` (cargo-nextest),
-`actionlint`, `deny` (advisory audit), and `generator-check`.
+`actionlint`, `deny` (advisory audit), and `generator-check` (the fleet audit).

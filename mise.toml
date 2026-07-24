@@ -31,9 +31,13 @@ run = "actionlint"
 description = "Audit dependency advisories"
 run = "cargo deny check advisories"
 
+[tasks.generate]
+description = "Render the five class templates and callable workflows from fleet data"
+run = "cargo run --locked -p velnor-actions-generator -- generate --root ."
+
 [tasks.generator-check]
-description = "Run the generator skeleton self-check"
-run = "cargo run --locked -p velnor-actions-generator -- check --root ."
+description = "Audit the fleet: regenerate, compare committed bytes, prove the closure"
+run = "cargo run --locked -p velnor-actions-generator -- audit --root ."
 
 [tasks.ci]
 description = "Run every repository gate"
