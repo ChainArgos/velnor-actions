@@ -169,6 +169,65 @@ fn one_byte_tamper_of_callable_fails_audit() {
 }
 
 #[test]
+fn one_byte_tamper_of_composite_fails_audit() {
+    // A single-byte edit to either composite action body fails the audit, exactly
+    // like a tampered template or callable workflow.
+    for name in ["run-gate", "aggregate"] {
+        let dir = common::bound_fixture(DUMMY_SHA);
+        common::tamper_one_byte(&dir.join("actions").join(name).join("action.yml"));
+        assert!(
+            audit::audit(&dir).is_err(),
+            "tampered composite {name} must fail audit"
+        );
+    }
+}
+
+#[test]
+fn neutered_run_gate_exec_fails_audit() {
+    // The exact attack: replace the run-gate exec line with a no-op so every CI
+    // gate silently passes. The audit must reject it (the body, not just refs, is
+    // byte-verified). The neutered composite stays a valid composite action with
+    // 40-hex refs, so only the body check can catch it.
+    let dir = common::bound_fixture(DUMMY_SHA);
+    let path = dir.join("actions").join("run-gate").join("action.yml");
+    let body = std::fs::read_to_string(&path).unwrap();
+    let neutered = body.replace("bash -eo pipefail -c \"${GATE_COMMAND}\"", "echo skipped");
+    assert_ne!(
+        neutered, body,
+        "the neutering must actually change the body"
+    );
+    assert!(neutered.contains("using: composite"), "still a composite");
+    std::fs::write(&path, &neutered).unwrap();
+    let err = audit::audit(&dir).expect_err("neutered composite must fail audit");
+    assert!(
+        err.contains("actions/run-gate/action.yml"),
+        "error names the tampered composite: {err}"
+    );
+}
+
+#[test]
+fn canonical_composites_match_committed() {
+    // The embedded canonical bytes stay byte-identical to the committed action
+    // files; otherwise the on-disk composites and the audit's source of truth have
+    // silently diverged.
+    use velnor_actions_generator::composite;
+    for name in composite::COMPOSITE_NAMES {
+        let committed = std::fs::read_to_string(
+            common::repo_root()
+                .join("actions")
+                .join(name)
+                .join("action.yml"),
+        )
+        .expect("committed composite");
+        assert_eq!(
+            committed,
+            composite::canonical(name).unwrap(),
+            "committed {name} matches canonical bytes"
+        );
+    }
+}
+
+#[test]
 fn block_sha_tamper_fails_audit() {
     let dir = common::bound_fixture(DUMMY_SHA);
     // Rebind block-sha without regenerating: committed callable workflows now

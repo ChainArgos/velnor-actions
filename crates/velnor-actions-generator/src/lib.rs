@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 
 pub mod audit;
+pub mod composite;
 pub mod model;
 pub mod render;
 
@@ -81,7 +82,9 @@ pub fn validate_layout(root: &Path) -> Result<(), String> {
 
 /// Generate every deterministic output from the declared fleet data under `root`.
 ///
-/// Always renders the five consumer class templates to
+/// Always writes the two composite building-block actions to
+/// `actions/<name>/action.yml` (from their canonical bytes) and renders the five
+/// consumer class templates to
 /// `templates/<class>/ci.yml`. When `fleet/block-sha` is bound to a 40-hex commit
 /// SHA, also renders the five owner-local callable workflows to
 /// `.github/workflows/ci-<class>.yml`, pinning their internal composite closure to
@@ -94,6 +97,18 @@ pub fn validate_layout(root: &Path) -> Result<(), String> {
 pub fn generate(root: &Path) -> Result<Vec<PathBuf>, String> {
     let manifest = model::FleetManifest::load(root)?;
     let mut written = Vec::new();
+
+    // Composite building blocks: canonical bytes live in `composite`, so they are
+    // regenerated and byte-compared exactly like every other generated file.
+    for name in composite::COMPOSITE_NAMES {
+        let body = composite::canonical(name)
+            .ok_or_else(|| format!("no canonical bytes for composite {name:?}"))?;
+        let dir = root.join("actions").join(name);
+        std::fs::create_dir_all(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+        let path = dir.join("action.yml");
+        write_if_changed(&path, body)?;
+        written.push(path);
+    }
 
     for class in ALL_CLASSES {
         let body = render::consumer_template(class);

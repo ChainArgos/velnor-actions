@@ -1,13 +1,15 @@
 //! Fleet audit.
 //!
-//! Regenerates every template (and, once the block SHA is bound, every callable
-//! workflow) in memory, compares against the committed bytes, materializes all 24
-//! repositories to prove each equals its class template, and enforces the closure,
-//! owner-fan-out, aggregation, gate, and routing invariants. Any one-byte hand
-//! edit to a generated file fails the audit.
+//! Regenerates every composite building-block action and every template (and, once
+//! the block SHA is bound, every callable workflow) in memory, compares against the
+//! committed bytes, materializes all 24 repositories to prove each equals its class
+//! template, and enforces the closure, owner-fan-out, aggregation, gate, and routing
+//! invariants. Any one-byte hand edit to a generated file — including a neutered
+//! composite run-script body — fails the audit.
 
 use std::path::Path;
 
+use crate::composite;
 use crate::model::{FleetManifest, OWNERS, is_sha40};
 use crate::render::{
     self, ACTIONS_REPO, CALVER_PLACEHOLDER, CANONICAL_OWNER, FLEET_SHA_PLACEHOLDER,
@@ -29,9 +31,11 @@ const AUDIT_CALVER: &str = "2026.7.0";
 pub fn audit(root: &Path) -> Result<String, String> {
     let manifest = FleetManifest::load(root)?;
 
-    // Composite building blocks must exist and be composite actions.
-    check_composite(root, "run-gate")?;
-    check_composite(root, "aggregate")?;
+    // Composite building blocks must exist and match their canonical bytes exactly
+    // (body included), so a neutered run-script fails the audit.
+    for name in composite::COMPOSITE_NAMES {
+        check_composite(root, name)?;
+    }
 
     // Every class template: regenerate and compare committed bytes.
     for class in ALL_CLASSES {
@@ -115,25 +119,40 @@ fn read_block_sha(path: &Path) -> Result<String, String> {
 }
 
 fn check_composite(root: &Path, name: &str) -> Result<(), String> {
-    let path = root.join("actions").join(name).join("action.yml");
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| format!("reading composite {}: {e}", path.display()))?;
-    if !text.contains("using: composite") {
+    let canonical = composite::canonical(name)
+        .ok_or_else(|| format!("no canonical bytes for composite {name:?}"))?;
+
+    // The embedded canonical bytes must themselves be a valid composite: this guards
+    // the constant in `composite` against a bad future edit (a non-composite, or a
+    // mutable/non-40-hex nested action ref).
+    if !canonical.contains("using: composite") {
         return Err(format!(
-            "composite {} is not a composite action",
-            path.display()
+            "canonical composite {name:?} is not a composite action"
         ));
     }
-    // Composite must not introduce any mutable or non-40-hex nested action ref.
-    for reference in uses_refs(&text) {
+    for reference in uses_refs(canonical) {
         if !is_sha40(&reference) {
             return Err(format!(
-                "composite {} references non-40-hex ref {reference:?}",
-                path.display()
+                "canonical composite {name:?} references non-40-hex ref {reference:?}"
             ));
         }
     }
+
+    // The committed action body must match the canonical bytes exactly. This is the
+    // full body — env, run script, and exec line — not merely the refs, so tampering
+    // (e.g. replacing the gate exec with `echo skipped`) fails the audit.
+    let path = composite_path(root, name);
+    let committed = read_committed(&path)?;
+    require_equal(&committed, canonical, &composite_path_display(name))?;
     Ok(())
+}
+
+fn composite_path(root: &Path, name: &str) -> std::path::PathBuf {
+    root.join("actions").join(name).join("action.yml")
+}
+
+fn composite_path_display(name: &str) -> String {
+    format!("actions/{name}/action.yml")
 }
 
 /// Extract the git ref of every `uses: OWNER/REPO...@REF` line (ignoring local
